@@ -49,7 +49,13 @@ export const DEFAULT_GEMINI_PROMPT = `Generic Drawing-to-Realistic-Image Prompt
 Analyze the uploaded architectural drawing/elevation carefully and automatically identify the space, room type, architectural elements, layout, materials, dimensions, openings, furniture positions, fixtures, wall treatments, flooring, ceiling details, and overall design intent visible in the drawing.Generate a highly realistic, photorealistic visualization of the same design shown in the uploaded drawing.
 Strict requirements:
 
-Preserve the original architectural design exactly as shown.
+Multiple Drawings / Views Rule:
+
+If the uploaded drawing contains more than one drawing, elevation, or view (for example four elevations showing the four sides of one room), treat all of them as different views of the SAME single space and of one unified design.
+Merge the information from every view into a single coherent space: keep walls, openings, doors, windows, niches, fixtures, furniture positions, materials, and proportions consistent across all sides.
+Output exactly ONE unified photorealistic image of that one space.
+CRITICAL: Do not reproduce the input composition. Do NOT output a collage, grid, mosaic, storyboard, or multiple separate panels. Do not keep the drawings' arrangement. The final image must be a single continuous scene of one room/design.
+Preserve the original architectural design exactly as shown, considering all views together.
 Do not change, redesign, remove, add, or relocate any architectural element.
 Maintain the same proportions, geometry, openings, walls, columns, doors, windows, niches, furniture positions, fixtures, patterns, and design details.
 Interpret the drawing intelligently and infer the appropriate real-world environment from the visual information itself.
