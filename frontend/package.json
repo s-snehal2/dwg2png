@@ -8,8 +8,10 @@
     "start": "node scripts/with-heap.mjs next start",
     "lint": "eslint",
     "test": "vitest run"
-  },  "dependencies": {
+  },
+  "dependencies": {
     "@node-projects/acad-ts": "^3.1.0",
+    "@vercel/blob": "^2.8.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.2.5",
     "lucide-react": "^1.41.0",

@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
 import { getConfig, ensureTempDirs } from "@/server/config";
 import { convertDwg } from "@/server/services/convertDwg";
-import { sweepTempDirs } from "@/server/services/fileCleanup";
+import { sweepExpiredOutputs, saveOutput } from "@/server/services/outputStore";
 import { validateExtension, validateFileSize } from "@/server/utils/fileValidation";
 import { toAppError, userMessageForCode, httpStatusForCode } from "@/server/utils/errors";
-import { newConversionId, uploadPath, outputPath, writeBufferFileAtomic, deleteFileIfExists } from "@/server/utils/storage";
+import { newConversionId, uploadPath, writeBufferFileAtomic, deleteFileIfExists } from "@/server/utils/storage";
 import { takeRateLimit } from "@/server/utils/rateLimit";
-import { writeFileSync } from "node:fs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -34,7 +33,7 @@ export async function POST(request: NextRequest) {
   const config = getConfig();
 
   try {
-    const removed = sweepTempDirs([config.uploadsDir, config.outputsDir], config.cleanupAgeMs);
+    const removed = await sweepExpiredOutputs(config.cleanupAgeMs);
     if (removed > 0) {
       log(`Cleanup removed ${removed} expired temporary file(s).`);
     }
@@ -100,10 +99,8 @@ export async function POST(request: NextRequest) {
     }
 
     const conversionId = newConversionId();
-    const outputAbs = outputPath(config.outputsDir, conversionId);
-    writeBufferFileAtomic(outputAbs, new Uint8Array(output.png));
     const fileName = `${baseName}.png`;
-    writeFileSync(`${outputAbs}.name`, fileName, "utf8");
+    await saveOutput(conversionId, output.png, fileName);
 
     log(
       `Converted ${file.name} to ${fileName} (${output.png.byteLength} bytes) with sheet "${output.viewName}".`

@@ -1,10 +1,9 @@
 import type { NextRequest } from "next/server";
 import { getConfig } from "@/server/config";
-import { sweepTempDirs } from "@/server/services/fileCleanup";
+import { readOutput, sweepExpiredOutputs } from "@/server/services/outputStore";
 import { httpStatusForCode, userMessageForCode } from "@/server/utils/errors";
 import type { ErrorCode } from "@/server/utils/errors";
-import { isSafeConversionId, outputPath } from "@/server/utils/storage";
-import { readFileSync, existsSync } from "node:fs";
+import { isSafeConversionId } from "@/server/utils/storage";
 
 export const runtime = "nodejs";
 
@@ -14,9 +13,11 @@ function log(message: string): void {
 
 /**
  * GET /api/download/[id]
- * Serves the PNG produced for a conversion. The file is intentionally NOT
- * deleted here so the in-page preview and the "Download PNG" button can both
- * use the same URL; temp copies are reclaimed by the age-based sweep.
+ * Serves the PNG produced for a conversion. On Vercel the output lives in
+ * Blob (durable across serverless instances); locally it is read from disk.
+ * The file is intentionally NOT deleted on download so the in-page preview
+ * and the "Download PNG" button can both use the same URL; age-based sweeping
+ * reclaims outputs.
  * IDs are validated strictly to prevent path traversal.
  */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,41 +28,28 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return errorResponse("FILE_NOT_FOUND");
   }
 
-  const outputAbs = outputPath(getConfig().outputsDir, id);
-  const nameAbs = `${outputAbs}.name`;
-
-  if (!existsSync(outputAbs)) {
+  const stored = await readOutput(id);
+  if (!stored) {
     log(`Download requested for missing output "${id}.png".`);
     return errorResponse("FILE_NOT_FOUND");
   }
 
-  const png = readFileSync(outputAbs);
-  const hasName = existsSync(nameAbs);
-  let baseName = "dwg-conversion.png";
-  if (hasName) {
-    try {
-      baseName = readFileSync(nameAbs, "utf8") || baseName;
-    } catch {
-      // Fall back to the generic name.
-    }
-  }
-  const safeBase = baseName.replace(/[^\w.\- ]+/g, "_");
+  const safeBase = stored.fileName.replace(/[^\w.\- ]+/g, "_");
 
-  // Best-effort periodic cleanup of expired temp files. Runs after the file
-  // has been read so the requested conversion can never sweep itself away;
-  // only resources older than the configured age are ever removed.
+  // Best-effort periodic cleanup of expired outputs. Runs after the file has
+  // been read so the requested conversion can never sweep itself away.
   try {
-    sweepTempDirs([getConfig().uploadsDir, getConfig().outputsDir], getConfig().cleanupAgeMs);
+    await sweepExpiredOutputs(getConfig().cleanupAgeMs);
   } catch {
     // Best-effort.
   }
 
-  return new Response(new Uint8Array(png), {
+  return new Response(new Uint8Array(stored.buffer), {
     status: 200,
     headers: {
       "Content-Type": "image/png",
       "Content-Disposition": `attachment; filename="${safeBase}"`,
-      "Content-Length": String(png.byteLength),
+      "Content-Length": String(stored.buffer.byteLength),
       "Cache-Control": "no-store",
     },
   });

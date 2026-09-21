@@ -1,10 +1,9 @@
 import type { NextRequest } from "next/server";
-import { getConfig, ensureTempDirs } from "@/server/config";
+import { getConfig } from "@/server/config";
 import { generateDrawingImage } from "@/server/services/geminiImage";
-import { sweepTempDirs } from "@/server/services/fileCleanup";
+import { sweepExpiredOutputs, readOutput, saveAiOutput } from "@/server/services/outputStore";
 import { toAppError, httpStatusForCode, userMessageForCode } from "@/server/utils/errors";
-import { isSafeConversionId, outputPath, aiOutputPath, writeBufferFileAtomic } from "@/server/utils/storage";
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { isSafeConversionId } from "@/server/utils/storage";
 import { takeRateLimit } from "@/server/utils/rateLimit";
 
 export const runtime = "nodejs";
@@ -42,9 +41,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return errorResponse("AI_NOT_CONFIGURED");
   }
 
-  // Best-effort periodic cleanup of expired temp files.
+  // Best-effort periodic cleanup of expired outputs.
   try {
-    sweepTempDirs([config.uploadsDir, config.outputsDir], config.cleanupAgeMs);
+    await sweepExpiredOutputs(config.cleanupAgeMs);
   } catch (err) {
     log(`Cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -53,43 +52,30 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return errorResponse("RATE_LIMITED");
   }
 
-  const pngAbs = outputPath(config.outputsDir, id);
-  if (!existsSync(pngAbs)) {
+  const stored = await readOutput(id);
+  if (!stored) {
     log(`Generate requested for missing output "${id}.png".`);
     return errorResponse("FILE_NOT_FOUND");
   }
 
-  let baseName = "dwg-conversion";
-  const nameAbs = `${pngAbs}.name`;
-  try {
-    if (existsSync(nameAbs)) {
-      const stored = readFileSync(nameAbs, "utf8");
-      if (stored) {
-        baseName = stored.replace(/\.png$/i, "");
-      }
-    }
-  } catch {
-    // Fall back to the generic name.
-  }
+  const baseName = stored.fileName.replace(/\.png$/i, "");
 
   try {
-    const png = readFileSync(pngAbs);
+    const png = stored.buffer;
     log(`Sending ${id}.png (${png.byteLength} bytes) to Gemini for AI generation.`);
 
     const { image, durationMs } = await generateDrawingImage(png, config);
     log(`Gemini returned AI image (${image.byteLength} bytes) in ${durationMs}ms.`);
 
-    ensureTempDirs(config);
-    const aiPath = aiOutputPath(config.outputsDir, id);
-    writeBufferFileAtomic(aiPath, new Uint8Array(image));
-    writeFileSync(`${aiPath}.name`, `${baseName}-ai.png`, "utf8");
+    const fileName = `${baseName}-ai.png`;
+    await saveAiOutput(id, image, fileName);
     log(`AI image written to ${id}.ai.png.`);
 
     return Response.json(
       {
         success: true,
         conversionId: id,
-        fileName: `${baseName}-ai.png`,
+        fileName,
         size: image.byteLength,
         durationMs,
       },

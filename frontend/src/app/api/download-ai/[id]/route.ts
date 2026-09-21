@@ -1,10 +1,9 @@
 import type { NextRequest } from "next/server";
 import { getConfig } from "@/server/config";
-import { sweepTempDirs } from "@/server/services/fileCleanup";
+import { readAiOutput, sweepExpiredOutputs } from "@/server/services/outputStore";
 import { httpStatusForCode, userMessageForCode } from "@/server/utils/errors";
 import type { ErrorCode } from "@/server/utils/errors";
-import { isSafeConversionId, aiOutputPath } from "@/server/utils/storage";
-import { readFileSync, existsSync } from "node:fs";
+import { isSafeConversionId } from "@/server/utils/storage";
 
 export const runtime = "nodejs";
 
@@ -16,7 +15,7 @@ function log(message: string): void {
  * GET /api/download-ai/[id]
  * Serves the AI-generated PNG produced by the /api/generate route.
  * Same structure as /api/download/[id] — no deletion on download,
- * age-based sweep reclaims files.
+ * age-based sweep reclaims outputs.
  */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,41 +25,27 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return errorResponse("FILE_NOT_FOUND");
   }
 
-  const aiPath = aiOutputPath(getConfig().outputsDir, id);
-  const nameAbs = `${aiPath}.name`;
-
-  if (!existsSync(aiPath)) {
+  const stored = await readAiOutput(id);
+  if (!stored) {
     log(`Download requested for missing AI output "${id}.ai.png".`);
     return errorResponse("FILE_NOT_FOUND");
   }
 
-  const png = readFileSync(aiPath);
-  let baseName = "dwg-ai-generation.png";
-  try {
-    if (existsSync(nameAbs)) {
-      const stored = readFileSync(nameAbs, "utf8");
-      if (stored) {
-        baseName = stored;
-      }
-    }
-  } catch {
-    // Fall back to the generic name.
-  }
-  const safeBase = baseName.replace(/[^\w.\- ]+/g, "_");
+  const safeBase = stored.fileName.replace(/[^\w.\- ]+/g, "_");
 
   // Best-effort periodic cleanup.
   try {
-    sweepTempDirs([getConfig().uploadsDir, getConfig().outputsDir], getConfig().cleanupAgeMs);
+    await sweepExpiredOutputs(getConfig().cleanupAgeMs);
   } catch {
     // Best-effort.
   }
 
-  return new Response(new Uint8Array(png), {
+  return new Response(new Uint8Array(stored.buffer), {
     status: 200,
     headers: {
       "Content-Type": "image/png",
       "Content-Disposition": `attachment; filename="${safeBase}"`,
-      "Content-Length": String(png.byteLength),
+      "Content-Length": String(stored.buffer.byteLength),
       "Cache-Control": "no-store",
     },
   });
@@ -69,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 function errorResponse(code: ErrorCode) {
   return Response.json(
     { success: false, error: userMessageForCode(code) },
-    { status: httpStatusForCode(code) },
+    { status: httpStatusForCode(code) }
   );
 }
 
