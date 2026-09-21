@@ -1,0 +1,16 @@
+# Local environment (secrets and machine-specific settings)
+.env
+
+# Temp files generated at runtime
+/temp/
+frontend/temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node / Next
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/

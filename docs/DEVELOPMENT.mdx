@@ -1,0 +1,626 @@
+---
+title: DWG → PNG Converter — Developer Documentation
+description: Architecture, data models, API reference, configuration, error taxonomy, and development guide for the DWG → PNG converter.
+---
+
+# DWG → PNG Converter — Developer Documentation
+
+This document is the developer reference for the whole application. It
+describes the architecture, the internal data model, every API endpoint, the
+configuration surface, the error taxonomy, and how to develop and test the
+code.
+
+The end-user documentation lives in [`../README.md`](../README.md); this file
+focuses on how the pieces fit together so you can extend or debug the app.
+
+---
+
+## Table of contents
+
+- [Overview](#overview)
+- [Tech stack](#tech-stack)
+- [Architecture & project layout](#architecture--project-layout)
+- [Conversion pipeline](#conversion-pipeline)
+- [Data model](#data-model)
+- [AI image generation (Gemini)](#ai-image-generation-gemini)
+- [Configuration reference](#configuration-reference)
+- [API reference](#api-reference)
+- [Errors & rate limiting](#errors--rate-limiting)
+- [Storage & file lifecycle](#storage--file-lifecycle)
+- [Development guide](#development-guide)
+- [Known limitations](#known-limitations)
+
+---
+
+## Overview
+
+A self-hosted web app that converts a single DWG drawing into a PNG image:
+
+1. The user uploads a `.dwg` file.
+2. The server reads and normalizes the drawing, renders it into an SVG, and
+   rasterizes that SVG into a white-background PNG.
+3. The user can preview and download the PNG.
+4. Optionally, the server sends the PNG to Google Gemini to produce a
+   photorealistic architectural visualization of the same drawing.
+
+Design principles:
+
+- **Single-page export.** The app exports exactly **one** sheet per conversion.
+  A DWG with more paper-space layouts than `MAX_LAYOUTS` (default `1`) is
+  rejected early with `MULTIPLE_LAYOUTS` instead of spending minutes rendering.
+- **Own renderer.** The SVG is produced by our own renderer from a normalized
+  internal model, not by the DWG parser's SVG writer. This decouples
+  rasterization from parsing and keeps control of line weights, colors, and
+  scaling.
+- **Fail safe on the network.** Nothing from a DWG is sent anywhere except the
+  (optional, key-gated) Gemini request. Internal error messages never reach the
+  browser — only friendly, translated messages keyed by an error code.
+
+---
+
+## Tech stack
+
+| Concern | Technology |
+| --- | --- |
+| Framework | Next.js **16.3.4** (App Router, Turbopack), Node.js 20+ |
+| UI | React **19.2.8**, Tailwind CSS **v4**, `radix-ui`, `shadcn`, `cn`, `class-variance-authority`, `lucide-react`, `sonner` (toasts), `next-themes`, `tw-animate-css` |
+| DWG parsing | `@node-projects/acad-ts` (pure TypeScript, MIT) |
+| PNG rasterization | `sharp` (libvips-based) |
+| Testing | `vitest` (unit + integration), `eslint` |
+
+All code lives under `frontend/` — there is no separate API service. Conversion
+runs inside the Next.js route handler with the Node.js runtime.
+
+---
+
+## Architecture & project layout
+
+### Runtime request flow
+
+```
+Browser ─► POST /api/convert ─► validate (extension, size, signature, rate limit)
+        │                        │
+        ▼                        ▼
+                             convertDwg (orchestrator)
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        ▼                           ▼                           ▼
+   dwgReader                countPaperLayouts               dwgParser
+   (acad-ts port)           (reject > MAX_LAYOUTS)          (normalize model)
+        │                           │                           │
+        └───────────────────────────┼───────────────────────────┘
+                                    ▼
+                        selectViewForConversion (one sheet)
+                                    │
+                                    ▼
+                           renderer → renderToSvg
+                                    │
+                                    ▼
+                     pngGenerator → sharp (SVG → PNG)
+                                    │
+                                    ▼
+                 write {id}.png + {id}.png.name sidecar
+                                    │
+                                    ▼
+            client preview: GET /api/download/[id]
+            optional AI:     POST /api/generate/[id] → GET /api/download-ai/[id]
+```
+
+### Directory layout
+
+```
+dwg2png/
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx                        # client homepage (state machine)
+│   │   │   ├── globals.css
+│   │   │   ├── layout.tsx
+│   │   │   └── api/
+│   │   │       ├── convert/route.ts            # POST multipart DWG → PNG
+│   │   │       ├── generate/[id]/route.ts      # POST AI image (Gemini)
+│   │   │       ├── download/[id]/route.ts      # GET PNG bytes
+│   │   │       └── download-ai/[id]/route.ts   # GET AI PNG bytes
+│   │   ├── components/
+│   │   │   ├── ConverterCard.tsx               # upload / convert / cancel / reset UI
+│   │   │   ├── ConversionProgress.tsx          # step indicator (upload→parse→render)
+│   │   │   ├── ConversionResult.tsx            # preview, warnings, downloads
+│   │   │   ├── ErrorMessage.tsx
+│   │   │   ├── ImageLightbox.tsx
+│   │   │   └── ImagePreviewCard.tsx
+│   │   ├── services/api.ts                     # client fetch wrappers
+│   │   ├── types/conversion.ts                 # shared result/error types
+│   │   └── server/
+│   │       ├── config.ts                       # read env → AppConfig
+│   │       ├── models/                         # normalized domain model
+│   │       │   ├── drawing.ts, entity.ts, page.ts, bounds.ts, layer.ts, block.ts
+│   │       ├── services/
+│   │       │   ├── dwgReader.ts                # DWG engine port + acad-ts adapter
+│   │       │   ├── dwgParser.ts                # normalize model, explode blocks
+│   │       │   ├── entityExtractor.ts          # acad-ts entity → normalized entity
+│   │       │   ├── boundsCalculator.ts         # union bounds of entities
+│   │       │   ├── coordinateMapper.ts         # world → pixel viewport
+│   │       │   ├── viewportMapper.ts           # project model entities into a page viewport
+│   │       │   ├── renderer.ts                 # normalized Drawing → SVG
+│   │       │   ├── pngGenerator.ts             # sharp SVG → PNG
+│   │       │   ├── convertDwg.ts               # orchestrator (inspect/select/render)
+│   │       │   ├── geminiImage.ts              # Gemini image generation
+│   │       │   └── fileCleanup.ts              # age-based temp sweep
+│   │       └── utils/
+│   │           ├── errors.ts                   # ErrorCode taxonomy + HTTP mapping
+│   │           ├── fileValidation.ts           # extension / size / DWG signature
+│   │           ├── rateLimit.ts                # per-IP sliding window
+│   │           ├── storage.ts                  # paths, atomic writes, safe IDs
+│   │           ├── geometry.ts                 # arc/bulge helpers
+│   │           └── lineWeight.ts               # raw DWG weight → pixels
+│   ├── temp/       # runtime uploads/ + outputs/ (git-ignored)
+│   ├── scripts/with-heap.mjs   # dev/build/start wrapper (Node heap tuning)
+│   ├── vitest.config.mts
+│   ├── eslint.config.mjs
+│   ├── next.config.ts
+│   └── package.json
+├── docker-compose.yml           # containerized "Docker Desktop" run
+├── README.md                    # end-user docs (links here)
+├── .env.example
+└── docs/
+    └── DEVELOPMENT.mdx          # this file
+```
+
+---
+
+## Conversion pipeline
+
+The pipeline is deliberately modular — every stage is a small, unit-testable
+function. Entry points: `frontend/src/server/services/convertDwg.ts`.
+
+### 1. Request handling — `app/api/convert/route.ts`
+
+On every `POST /api/convert`:
+
+1. **Temp sweep** — `sweepTempDirs` removes files older than
+   `CLEANUP_AGE_MINUTES` (best effort; failures are logged, not fatal).
+2. **Rate limit** — `takeRateLimit(clientIp(request), …)` rejects with
+   `RATE_LIMITED` when the per-IP budget is exceeded.
+3. **Multipart parse** — reads a single `file` field (`File`).
+4. **Validation** — extension must be `.dwg` (`validateExtension`) and size
+   within `MAX_FILE_SIZE_MB` (`validateFileSize`).
+5. **Convert** — calls `convertDwg(buffer, config)`, writes the PNG and a
+   `.name` sidecar, returns the JSON result with statistics.
+6. **Cleanup** — the temp upload is always deleted in a `finally` block.
+
+`export const maxDuration = 300` (up to 5 minutes) and `runtime = "nodejs"`.
+
+### 2. Orchestration — `convertDwg.ts`
+
+`convertDwg` runs three phases and reports timings for each:
+
+```ts
+const inspected = await inspectDwg(arrayBuffer, logger, overrides, { maxLayouts });
+const view = selectViewForConversion(inspected.views, config.maxLayouts);
+const output = await renderViewPng(view, config, logger);
+```
+
+- **Signature check** — `validateDwgSignature` verifies the `AC10` magic bytes
+  and the version (`AC1014`…`AC1032` = R14…2018). Passwords/corruption or an
+  unknown version are rejected before any heavy parsing.
+- **Early layout count** — `countPaperLayouts` walks the ACAD_LAYOUT table (not
+  entity data) and rejects the file with `MULTIPLE_LAYOUTS` if there are more
+  paper-space layouts than `maxLayouts`. This is the cheap fail-fast path: big
+  multi-sheet files are refused in seconds instead of after minutes of block
+  explosion.
+- **Parse** — `dwgParser.parseViews` normalizes the model space and every
+  paper-space layout into `ParsedView`s.
+- **Selection** — `selectViewForConversion` picks the single sheet to render:
+  the paper-space layout if present, else the raw model space. With no content
+  at all it throws `NO_DRAWABLE_CONTENT`.
+- **Render** — `renderViewPng` renders and rasterizes at up to
+  `MAX_PNG_DIMENSION`. For very large drawings (≥ 15,000 normalized entities)
+  the supersample is disabled (`supersampleForEntities`) — a 6000px canvas with
+  tens of thousands of entities would otherwise be disproportionately slow.
+
+### 3. Reading — `dwgReader.ts`
+
+A port seam isolates the whole app from the concrete DWG engine:
+
+```ts
+interface RawDwgData { version: string | null; document: CadDocument }
+interface DwgReaderPort { read(arrayBuffer: ArrayBuffer): RawDwgData }
+```
+
+`AcadDwgReader` wraps `DwgReader.readFromStream` from `@node-projects/acad-ts`.
+The engine is created via `createDwgReader()`; tests inject a fake port through
+`overrides`. Swapping engines later means implementing `DwgReaderPort` only.
+
+### 4. Normalization — `dwgParser.ts` + `entityExtractor.ts`
+
+Parsing converts the acad-ts object graph into the internal `Drawing` model.
+Highlights:
+
+- **Entity extraction** (`entityExtractor.ts`) maps acad-ts classes
+  (`Line`, `Circle`, `Arc`, `Point`, `Ellipse`, `LwPolyline`, `Polyline*`,
+  `TextEntity`, `MText`, `Spline`, `Solid`, `Face3D`) into typed normalized
+  entities. Colors resolve to CSS hex; near-white colors become black; layers
+  and visibility are resolved eagerly.
+- **Splines** are tessellated into dense polylines via
+  `spline.tryPolygonalVertexes(...)` (segment count scales with control-point
+  count, clamped to 24…512).
+- **INSERT / block expansion** — architectural drawings rely on blocks.
+  `normalizeEntity` explodes `Insert` recursively back into world coordinates.
+  `MAX_BLOCK_EXPANSION_DEPTH = 16` guards against self-referencing or deeply
+  nested blocks that would otherwise blow the call stack. Non-renderable
+  sub-entities (`HANDLE`, `SEQEND`, `VERTEX`, …) are skipped silently.
+- **Hatches** — solid/plain hatches become one filled polygon per boundary
+  loop; pattern hatches are exploded into their line segments (falls back to
+  the boundary outline if the explode fails).
+- **Dimensions** — the anonymous `*D` block is rendered so extension lines,
+  arrowheads, and measured text reproduce what AutoCAD shows. Grip-definition
+  `POINT`s are dropped.
+- **Leaders** — become a polyline plus an optional filled arrowhead triangle
+  sized from the dimension style (with a legibility fallback for tiny or
+  unit-mismatched styles).
+- **Paper-space views** — each ACAD_LAYOUT layout becomes a `ParsedView`; its
+  `Viewport` entities become `PageViewport` windows (with `frozenLayers` and
+  rotation). Layouts with no renderable content are skipped. Legacy DWGs with
+  no layout table fall back to the single `*Paper_Space` block.
+- **Warning aggregation** — the `WarningCollector` collapses the ubiquitous
+  "unsupported entity" noise into one line per type with a running count.
+
+Stats are collected per view: `totalEntities`, `renderedEntities`,
+`skippedEntities` (unsupported + invisible + failed), plus `page.{entityCount,
+viewportCount}` when a paper-space page exists.
+
+### 5. Rendering — `renderer.ts`
+
+The renderer is the only consumer of the `Drawing` model (400-line module,
+no acad-ts imports). It emits a plain SVG in **final pixel coordinates**
+(Y inverted, margins applied, white background):
+
+- **Two modes** — `renderModelToSvg` fits the raw model bounds;
+  `renderPageToSvg` renders the sheet at page proportions with each viewport
+  window showing the model content **clipped** to its rectangle. This
+  reproduces what AutoCAD shows at "full page size".
+- **Z-order** — entities are emitted in fixed passes:
+  `POLYLINE → LINE → CIRCLE → ARC → ELLIPSE → SOLID → POINT → TEXT → MTEXT`
+  so fills land behind text.
+- **Supersampling** — the SVG is emitted at `supersample × target size`, then
+  sharp downsamples it (anti-aliasing). `MAX_SUPERSAMPLED_EDGE = 6144` scales
+  the supersample back so no canvas edge explodes.
+- **Geometry quality** — arcs and ellipses are sampled with an adaptive step
+  that keeps chord error at ~0.25 px (`arcStep`); polyline bulges are rebuilt
+  into arcs via `arcFromBulge`; ellipse geometry derives the minor axis from
+  the major-axis endpoint and `radiusRatio`.
+- **Line weights** — `mapLineWeightToPixels` (Raw DWG 1/100 mm → px), floored
+  at `MIN_STROKE_PX` so hairlines don't vanish.
+- **Text** — rendered as `<text>` with font-size from CAD height, rotation,
+  and XML escaping. Alignment is currently fixed to left/baseline (see
+  [Known limitations](#known-limitations)).
+- **Colors** — `COLOR_MODE=color` uses the resolved entity colors; the default
+  outputs pure black strokes on white.
+
+### 6. Rasterization — `pngGenerator.ts`
+
+`sharp` rasterizes the SVG with a white `flatten`, `resize({ fit: "inside",
+withoutEnlargement: true, kernel: lanczos3 })`, and PNG compression level 9.
+No unsharp mask is applied so output stays true to the drawing's line weights.
+
+---
+
+## Data model
+
+Shared, serializable types with **no acad-ts dependency** below the parser
+boundary.
+
+### `Drawing` (`server/models/drawing.ts`)
+
+```ts
+interface Drawing {
+  bounds: Bounds;
+  entities: Entity[];        // normalized model-space entities
+  layers: Layer[];
+  blocks: Block[];           // empty in practice (blocks consumed by expansion)
+  page?: Page;               // present when a paper-space sheet exists
+}
+```
+
+### `Bounds` (`server/models/bounds.ts`)
+
+`minX, minY, maxX, maxY`; helpers `boundsWidth`, `boundsHeight`,
+`boundsAreValid`. Computed by `boundsCalculator.drawingBounds`.
+
+### Entities (`server/models/entity.ts`)
+
+All entities carry `color` (resolved CSS hex), `layer`, `lineWeight`
+(DWG 1/100 mm), optional `lineType`, and `sourceType` (original DWG class name
+for reporting). Types:
+
+| Type | Fields |
+| --- | --- |
+| `LINE` | `start`, `end` |
+| `CIRCLE` | `center`, `radius` |
+| `ARC` | `center`, `radius`, `startAngle`, `endAngle` (radians, CCW) |
+| `POINT` | `position` |
+| `ELLIPSE` | `center`, `majorAxisEndPoint`, `radiusRatio` (0..1), `startAngle`, `endAngle`, `full` |
+| `POLYLINE` | `vertices`, `closed`, `bulges[]` (bulge of segment i→i+1) |
+| `TEXT` | `position`, `rotation`, `height`, `text`, `alignment` |
+| `MTEXT` | `position`, `rotation`, `height`, `text`, `width`, `alignment` |
+| `SOLID` | `vertices` (3 or 4), `filled` — used for SOLID/3DFACE and hatch fills |
+
+`SUPPORTED_ENTITY_TYPES` is the canonical allow-list.
+
+### Page (`server/models/page.ts`)
+
+- `Page { entities, viewports, bounds }` — the sheet itself (border, title
+  block, notes) plus viewports and its overall bounds.
+- `PageViewport` — the viewport rect on the page (`minX..maxY`), the
+  model-space region it shows (`viewCenterX..viewHeight`), rotation `twist`,
+  and `frozenLayers` (rendered blank).
+
+### Layer & Block (`server/models/layer.ts`, `block.ts`)
+
+- `Layer { name, visible, color?, lineWeight?, lineType? }`
+- `Block { name, entities }`
+
+### Statistics (`server/services/dwgParser.ts`)
+
+```ts
+interface ConversionStatistics {
+  totalEntities: number;
+  renderedEntities: number;   // produced ≥1 normalized entity
+  skippedEntities: number;    // total - rendered
+  warnings: string[];         // aggregated "Unsupported entity X skipped (n)."
+  page?: { entityCount: number; viewportCount: number };
+}
+```
+
+### Client types (`types/conversion.ts`)
+
+Server responses are typed by `ConversionResult` (id, `fileName`, `size`,
+`version`, `statistics`, `warnings`, `durationMs`) and `AiImageResult`
+(`conversionId`, `fileName`, `size`, `durationMs`).
+
+---
+
+## AI image generation (Gemini)
+
+Optional, gated on `GEMINI_API_KEY` being set. Flow:
+
+1. `POST /api/generate/[id]` — validates the id, the key, the rate limit, and
+   that `outputs/{id}.png` exists.
+2. Reads the converted PNG and calls `generateDrawingImage` in
+   `server/services/geminiImage.ts`:
+
+   - `generateContent` to Gemini 3.1 Flash (`gemini-3.1-flash-image`,
+     overridable via `GEMINI_MODEL`), payload is `{ parts: [{ inlineData:
+     { mimeType: "image/png", data: <base64> } }, { text: prompt }] }`.
+   - The response is parsed leniently for inline or generated-byte data.
+   - A **90-second `AbortSignal.timeout`** abort maps to a friendly
+     `AI_GENERATION_ERROR` ("timed out") instead of a dangling request.
+
+3. Stores `outputs/{id}.ai.png` (+ `.name` sidecar `{base}-ai.png`) and
+   returns the metadata.
+4. `GET /api/download-ai/[id]` serves the generated PNG (same conventions as
+   the regular download, including content-type validation client-side).
+
+The default static prompt (`DEFAULT_GEMINI_PROMPT` in `config.ts`) asks Gemini
+to identify the space from the drawing itself and produce a photorealistic,
+**text-free** visualization that preserves the original geometry exactly. It is
+overridable with `GEMINI_PROMPT`.
+
+If no key is configured, the endpoint returns `AI_NOT_CONFIGURED` (503).
+
+---
+
+## Configuration reference
+
+`server/config.ts` reads the environment **on every call** (so tests can set
+values without import-order tricks) and returns an `AppConfig`. Paths
+`TEMP_DIR`, `uploadsDir`, `outputsDir` are derived from `TEMP_DIR`.
+
+| Env var | Default | Description |
+| --- | --- | --- |
+| `MAX_FILE_SIZE_MB` | `50` | Upload size limit in MB |
+| `MAX_LAYOUTS` | `1` | Max paper-space layouts; more → `MULTIPLE_LAYOUTS` rejection |
+| `MAX_PNG_DIMENSION` | `3000` | Max output width/height in px (fitted inside, no upscaling) |
+| `PNG_SUPERSAMPLE` | `2` | Supersample factor for anti-aliasing (rendered large, downscaled) |
+| `MIN_STROKE_PX` | `1` | Minimum stroke thickness in px so hairlines stay visible |
+| `MARGIN_PX` | `50` | Padding around the drawing, in px |
+| `TEMP_DIR` | `./temp` | Root for uploads/ and outputs/ (relative to `process.cwd()`) |
+| `CLEANUP_AGE_MINUTES` | `1440` | Age after which temp files are swept |
+| `RATE_LIMIT_PER_MINUTE` | `30` | Per-IP requests/minute on convert + generate |
+| `COLOR_MODE` | *(unset)* | `color` → colored (layer/entity) output; default monochrome |
+| `GEMINI_API_KEY` | *(empty)* | Google AI key; empty → AI generation disabled |
+| `GEMINI_MODEL` | `gemini-3.1-flash-image` | Gemini image model id |
+| `GEMINI_PROMPT` | *(built-in)* | Static prompt sent to Gemini with the PNG |
+
+`ensureTempDirs(config)` creates `uploads/` and `outputs/` when needed.
+
+---
+
+## API reference
+
+All JSON error responses share the shape:
+
+```json
+{ "success": false, "error": "<friendly message>" }
+```
+
+The `error` string is the **user-facing** message for the mapped code — never
+an internal stack trace (see [Errors](#errors--rate-limiting)).
+
+### `POST /api/convert`
+
+Multipart form-data, field `file` (`*.dwg`).
+
+- Runtime: `nodejs`, `maxDuration: 300`.
+- Validates: extension, size, DWG signature/version, layout count, rate limit.
+- **200**
+
+```json
+{
+  "success": true,
+  "conversionId": "uuid",
+  "originalFileName": "floor.dwg",
+  "fileName": "floor.png",
+  "size": 284123,
+  "version": "AC1032",
+  "statistics": { "totalEntities": 1024, "renderedEntities": 980, "skippedEntities": 44, "warnings": [] },
+  "warnings": [],
+  "durationMs": 5231
+}
+```
+
+- **4xx/5xx** on failure (see error table); the temp upload is deleted either
+  way.
+- `GET` returns 405 with a hint.
+
+### `POST /api/generate/[id]`
+
+Generates the AI image for an existing conversion. Requires `GEMINI_API_KEY`.
+
+- Validates: id format, key present, rate limit, output file exists.
+- **200** → `{ success, conversionId, fileName, size, durationMs }`.
+- **503** `AI_NOT_CONFIGURED` when the key is missing; **404** `FILE_NOT_FOUND`
+  when the PNG is gone.
+
+### `GET /api/download/[id]`
+
+Serves `{id}.png` as an attachment (`Content-Disposition`, `Content-Type:
+image/png`, `Cache-Control: no-store`). The file is **not deleted** on download
+so the in-page preview and the PNG button share the URL; the age-based sweep
+reclaims it.
+
+### `GET /api/download-ai/[id]`
+
+Serves `{id}.ai.png` with the same semantics; name sidecar defaults to
+`dwg-ai-generation.png`.
+
+---
+
+## Errors & rate limiting
+
+`server/utils/errors.ts` defines the complete taxonomy; a single mapping each
+produces the user message and HTTP status so UI and API never drift.
+
+| Code | HTTP | User message |
+| --- | --- | --- |
+| `INVALID_FILE` | 400 | The uploaded file could not be read. |
+| `UNSUPPORTED_EXTENSION` | 400 | Only DWG files are supported. |
+| `FILE_TOO_LARGE` | 400 | File size exceeds the allowed limit. |
+| `RATE_LIMITED` | 400 | Too many requests. Please try again shortly. |
+| `CORRUPTED_DWG` | 422 | Unable to read DWG file. It may be corrupted or password-protected. |
+| `UNSUPPORTED_DWG_VERSION` | 422 | Unsupported DWG version. R14 (AC1014) and newer are supported. |
+| `MULTIPLE_LAYOUTS` | 422 | This DWG contains more than one drawing… |
+| `PARSER_ERROR` | 422 | The DWG file could not be parsed. |
+| `NO_DRAWABLE_CONTENT` | 422 | No drawable content was found in this DWG file. |
+| `FILE_NOT_FOUND` | 404 | The requested conversion result no longer exists. |
+| `AI_NOT_CONFIGURED` | 503 | AI image generation is not configured on this server. |
+| `RENDER_ERROR` | 500 | The drawing could not be rendered. |
+| `PNG_GENERATION_ERROR` | 500 | The PNG image could not be generated. |
+| `AI_GENERATION_ERROR` | 500 | The AI image could not be generated. Please try again. |
+| `DOWNLOAD_ERROR` | 500 | The PNG could not be downloaded. |
+| `INTERNAL_ERROR` | 500 | Conversion failed. Please try again. |
+
+`toAppError(err)` normalizes anything thrown into an `AppError` by looking at
+message keywords ("unsupported"/"version" → `UNSUPPORTED_DWG_VERSION`,
+"corrupt"/"magic"/"header" → `CORRUPTED_DWG`, "render"/"svg" →
+`RENDER_ERROR`, "gemini"/"ai image" → `AI_GENERATION_ERROR`, …).
+
+Rate limiting is a per-IP sliding window (`utils/rateLimit.ts`,
+`takeRateLimit(ip, max, windowMs)`), keyed off `x-forwarded-for` /
+`x-real-ip`, applied to convert and generate.
+
+---
+
+## Storage & file lifecycle
+
+`server/utils/storage.ts` owns everything on disk:
+
+- **IDs** — `newConversionId()` = `randomUUID()`. `isSafeConversionId` enforces
+  the strict UUID pattern on every route that accepts an id, so path traversal
+  is impossible.
+- **Layout on disk** under `TEMP_DIR`:
+
+  ```
+  temp/
+  ├── uploads/{id}.dwg        # deleted after conversion (finally block)
+  └── outputs/{id}.png        # consumed by download + generate routes
+                 {id}.png.name         # output filename sidecar (UTF-8)
+                 {id}.ai.png           # AI result
+                 {id}.ai.png.name      # AI filename sidecar
+  ```
+
+- **Atomic writes** — `writeBufferFileAtomic` writes to a unique sibling
+  `*.tmp` and `rename`s over the destination, so a concurrent download can
+  never observe a partial file.
+- **Sweep** — `fileCleanup.sweepTempDirs` removes files older than
+  `CLEANUP_AGE_MINUTES`, invoked opportunistically from the convert, generate,
+  and download routes (always after the requested file has been read, so a
+  conversion can never sweep itself away).
+
+---
+
+## Development guide
+
+### Commands (run from `frontend/`)
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Next dev server (wrapped by `scripts/with-heap.mjs`) |
+| `npm run build` | Production build (`next build` with heap tuning) |
+| `npm run start` | Serve the production build |
+| `npm run lint` | ESLint (flat config, `eslint.config.mjs`) |
+| `npm test` | `vitest run` — unit + integration |
+| `npx tsc --noEmit` | Type checking |
+
+`scripts/with-heap.mjs` launches node with a larger heap (the acad-ts parse and
+sharp rasterization of large files need it).
+
+### Environment
+
+Copy `frontend/.env.example` → `frontend/.env` (Next.js auto-loads it from the
+`frontend/` directory). With Docker, edit the root `.env` instead —
+`docker-compose.yml` passes the relevant vars (including `MAX_LAYOUTS`,
+`PNG_SUPERSAMPLE`, `MIN_STROKE_PX`) into the container.
+
+### Testing
+
+Vitest covers:
+
+- `convertDwg` orchestration decisions: layout counting, single-sheet selection,
+  `MULTIPLE_LAYOUTS` rejection.
+- API routes (`convert`, `generate`, `download`, `download-ai`) with fake
+  reader ports, throwaway `TEMP_DIR`s, and in-memory FormData.
+- Pure functions: geometry, line weights, coordinate mapping, bounds,
+  normalization, error mapping, rate limiting, storage.
+
+Real-DWG verification is done with a small throwaway test file placed under
+`frontend/temp/uploads/` (it is created, run, then deleted) — the repo's real
+samples stay out of git. The same directory holds the fixtures used by the
+integration tests.
+
+### Docker
+
+`docker compose up --build` builds the standalone Next server; temp files are
+persisted in the `dwg2png-temp` volume.
+
+---
+
+## Known limitations
+
+- **One sheet per file** — multi-layout DWGs are rejected by design
+  (`MAX_LAYOUTS`, default 1). Raise it, but note the renderer still exports
+  only the first paper-space sheet chosen by `selectViewForConversion`.
+- **Text alignment** — `textAlignment` in `entityExtractor.ts` currently
+  returns a constant left/baseline alignment; CAD horizontal/vertical alignment
+  flags are parsed but not applied yet.
+- **DWG versions** — R14 (`AC1014`) through 2018 (`AC1032`) are accepted;
+  anything newer fails signature/version validation.
+- **Unsupported entity types** are counted and reported as warnings rather than
+  rendered (see `SUPPORTED_ENTITY_TYPES`). Notable: splines are tessellated to
+  polylines (faithful, but heavy).
+- **Blocks table** — named blocks are not pre-normalized; only inserted block
+  instances are expanded (avoids wasting CPU on never-inserted definitions).
+- **Color extremes** — near-white colors resolve to black for stroke
+  visibility on the white background.
+- **AI image** — requires a configured `GEMINI_API_KEY`; generation is
+  time-boxed at 90 seconds server-side.

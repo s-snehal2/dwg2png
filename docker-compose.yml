@@ -1,0 +1,31 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    environment:
+      # All settings come from the sibling `.env` file (see .env.example).
+      # `${VAR:-default}` means the default applies when .env is missing.
+      TEMP_DIR: ${TEMP_DIR:-/app/temp}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+      MAX_LAYOUTS: ${MAX_LAYOUTS:-1}
+      MAX_PNG_DIMENSION: ${MAX_PNG_DIMENSION:-3000}
+      MARGIN_PX: ${MARGIN_PX:-50}
+      PNG_SUPERSAMPLE: ${PNG_SUPERSAMPLE:-2}
+      MIN_STROKE_PX: ${MIN_STROKE_PX:-1}
+      CLEANUP_AGE_MINUTES: ${CLEANUP_AGE_MINUTES:-1440}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
+      # AI image generation — leave GEMINI_API_KEY empty to disable.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-image}
+      COLOR_MODE: ${COLOR_MODE:-}
+      # GEMINI_PROMPT is intentionally NOT passed by default so the built-in
+      # prompt is used; uncomment the line above-style entry below only if you
+      # set GEMINI_PROMPT in your `.env` file:
+      # GEMINI_PROMPT: ${GEMINI_PROMPT:-}
+    volumes:
+      - dwg2png-temp:/app/temp
+
+volumes:
+  dwg2png-temp:
