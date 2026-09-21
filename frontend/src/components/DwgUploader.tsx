@@ -71,7 +71,7 @@ export default function DwgUploader({ file, onFile, onClear, disabled = false, m
         handleFiles(e.dataTransfer.files);
       }}
       className={cn(
-        "group relative flex w-full cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 px-6 py-9 text-center outline-none transition-all",
+        "group relative flex w-full cursor-pointer flex-col items-center justify-center gap-2.5 overflow-hidden rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 px-4 py-8 text-center outline-none transition-all sm:gap-3 sm:px-6 sm:py-9",
         "hover:border-primary/50 focus-visible:border-primary focus-visible:ring-4 focus-visible:ring-ring/40",
         dragging && "border-primary bg-primary/5 ring-4 ring-primary/10",
         disabled && "pointer-events-none cursor-not-allowed opacity-50"
@@ -99,8 +99,8 @@ export default function DwgUploader({ file, onFile, onClear, disabled = false, m
         <div className="text-[15px] font-semibold text-foreground">Drop a .dwg file here</div>
         <div className="mt-0.5 text-[13px] text-muted-foreground">to convert it into a sharp PNG image</div>
       </div>
-      <div className="relative flex items-center gap-3">
-        <span className="rounded-lg border border-border bg-background px-3.5 py-1.5 text-[13px] font-semibold text-foreground shadow-sm transition-all group-hover:border-primary/40 group-hover:text-primary">
+      <div className="relative flex flex-col-reverse items-center gap-2.5 sm:flex-row sm:gap-3">
+        <span className="rounded-lg border border-border bg-background px-4 py-2 text-[13px] font-semibold text-foreground shadow-sm transition-all group-hover:border-primary/40 group-hover:text-primary">
           Browse files
         </span>
         <span className="text-xs text-muted-foreground">or drag &amp; drop · max {maxMb} MB</span>
