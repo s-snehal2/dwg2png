@@ -18,6 +18,7 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
   const [downloading, setDownloading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [aiDone, setAiDone] = useState(false);
+  const [aiUsage, setAiUsage] = useState<{ used: number; limit: number } | null>(null);
   const [lightbox, setLightbox] = useState<"png" | "ai" | null>(null);
 
   const handleDownload = useCallback(async () => {
@@ -50,7 +51,8 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
     setGenerating(true);
     setAiDone(false);
     try {
-      await generateAiImage(result.conversionId);
+      const res = await generateAiImage(result.conversionId);
+      setAiUsage({ used: res.generationsUsed, limit: res.generationsLimit });
       setAiDone(true);
       toast.success("AI image generated successfully.");
     } catch (err) {
@@ -180,9 +182,17 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
               <>
                 <Sparkles />
                 Generate AI image
+                {aiUsage ? ` (${aiUsage.used}/${aiUsage.limit})` : ""}
               </>
             )}
           </Button>
+
+          {aiUsage && aiUsage.used >= aiUsage.limit && (
+            <p className="px-1 text-center text-xs text-muted-foreground">
+              Generation limit reached ({aiUsage.limit}/{aiUsage.limit}). Convert the DWG again to
+              generate more.
+            </p>
+          )}
 
           {aiDone && (
             <div className="animate-slide-up">

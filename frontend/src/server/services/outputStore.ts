@@ -38,11 +38,18 @@ function aiNameBlobPath(id: string): string {
   return `${aiBlobPath(id)}.name`;
 }
 
+function aiCountBlobPath(id: string): string {
+  return `${aiBlobPath(id)}.count`;
+}
+
 async function putBlob(pathname: string, body: string | Buffer, contentType: string): Promise<void> {
   await put(pathname, body, {
     access: "private",
     contentType,
     cacheControlMaxAge: 60,
+    // Re-generating an AI image for the same conversion reuses the same path,
+    // so overwriting must be allowed (the default throws "blob already exists").
+    allowOverwrite: true,
   });
 }
 
@@ -138,6 +145,41 @@ function readSidecarName(path: string, fallback: string): string {
     // Fall back to the generic name.
   }
   return fallback;
+}
+
+/** Number of AI images successfully generated for a conversion (0 when none). */
+export async function getAiGenerationCount(id: string): Promise<number> {
+  if (isBlobEnabled()) {
+    const stored = await readBlobText(aiCountBlobPath(id));
+    return parseCount(stored);
+  }
+  const abs = `${aiOutputPath(getConfig().outputsDir, id)}.count`;
+  try {
+    if (!existsSync(abs)) {
+      return 0;
+    }
+    return parseCount(readFileSync(abs, "utf8"));
+  } catch {
+    return 0;
+  }
+}
+
+/** Records one successful AI generation and returns the new total. */
+export async function incrementAiGenerationCount(id: string): Promise<number> {
+  const next = (await getAiGenerationCount(id)) + 1;
+  if (isBlobEnabled()) {
+    await putBlob(aiCountBlobPath(id), String(next), "text/plain");
+    return next;
+  }
+  const config = getConfig();
+  ensureTempDirs(config);
+  writeFileSync(`${aiOutputPath(config.outputsDir, id)}.count`, String(next), "utf8");
+  return next;
+}
+
+function parseCount(stored: string | null): number {
+  const parsed = Number.parseInt(stored ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 /** Age-based sweep of expired outputs (uploads + outputs). Best-effort. */

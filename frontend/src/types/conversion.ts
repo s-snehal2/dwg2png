@@ -30,4 +30,8 @@ export interface AiImageResult {
   fileName: string;
   size: number;
   durationMs: number;
+  /** AI generations used for this conversion after this request. */
+  generationsUsed: number;
+  /** Maximum AI generations allowed per conversion. */
+  generationsLimit: number;
 }

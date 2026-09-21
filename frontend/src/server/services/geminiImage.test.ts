@@ -17,6 +17,7 @@ const baseConfig: AppConfig = {
   geminiApiKey: "test-api-key",
   geminiPrompt: "Turn this drawing into a photorealistic visualization.",
   geminiModel: "gemini-3.1-flash-image",
+  aiGenerationLimit: 5,
 };
 
 function makeFakePng(): Buffer {

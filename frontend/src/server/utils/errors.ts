@@ -15,6 +15,7 @@ export type ErrorCode =
   | "NO_DRAWABLE_CONTENT"
   | "AI_NOT_CONFIGURED"
   | "AI_GENERATION_ERROR"
+  | "AI_LIMIT_REACHED"
   | "FILE_NOT_FOUND"
   | "DOWNLOAD_ERROR"
   | "RATE_LIMITED"
@@ -43,6 +44,7 @@ const USER_MESSAGES: Record<ErrorCode, string> = {
   NO_DRAWABLE_CONTENT: "No drawable content was found in this DWG file.",
   AI_NOT_CONFIGURED: "AI image generation is not configured on this server.",
   AI_GENERATION_ERROR: "The AI image could not be generated. Please try again.",
+  AI_LIMIT_REACHED: "You've reached the maximum number of AI image generations for this drawing. Convert the DWG again to generate more.",
   FILE_NOT_FOUND: "The requested conversion result no longer exists.",
   DOWNLOAD_ERROR: "The PNG could not be downloaded.",
   RATE_LIMITED: "Too many requests. Please try again shortly.",
@@ -70,6 +72,8 @@ export function httpStatusForCode(code: ErrorCode): number {
       return 404;
     case "AI_NOT_CONFIGURED":
       return 503;
+    case "AI_LIMIT_REACHED":
+      return 429;
     case "RENDER_ERROR":
     case "PNG_GENERATION_ERROR":
     case "AI_GENERATION_ERROR":
@@ -110,7 +114,7 @@ export function toAppError(err: unknown): AppError {
     if (lower.includes("gemini") || lower.includes("ai image") || lower.includes("generatecontent")) {
       return new AppError("AI_GENERATION_ERROR", message);
     }
-    return new AppError("PARSER_ERROR", message);
+    return new AppError("INTERNAL_ERROR", message);
   }
   return new AppError("INTERNAL_ERROR", String(err));
 }

@@ -22,6 +22,8 @@ export interface AppConfig {
   geminiPrompt: string;
   /** Gemini image-generation model id (Nano Banana 2). */
   geminiModel: string;
+  /** Max successful AI image generations allowed per converted drawing. */
+  aiGenerationLimit: number;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -94,6 +96,7 @@ export function getConfig(): AppConfig {
     geminiApiKey: (process.env.GEMINI_API_KEY ?? "").trim(),
     geminiPrompt: (process.env.GEMINI_PROMPT ?? DEFAULT_GEMINI_PROMPT).trim(),
     geminiModel: (process.env.GEMINI_MODEL ?? "gemini-3.1-flash-image").trim(),
+    aiGenerationLimit: parsePositiveInt(process.env.AI_GENERATION_LIMIT, 5),
   };
 }
 

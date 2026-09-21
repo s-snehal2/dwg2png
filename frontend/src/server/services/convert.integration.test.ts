@@ -21,6 +21,7 @@ const TEST_CONFIG: AppConfig = {
   geminiApiKey: "",
   geminiPrompt: "",
   geminiModel: "gemini-3.1-flash-image",
+  aiGenerationLimit: 5,
 };
 
 const MINIMAL_DXF = `0

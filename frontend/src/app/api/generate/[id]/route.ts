@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getConfig } from "@/server/config";
 import { generateDrawingImage } from "@/server/services/geminiImage";
-import { sweepExpiredOutputs, readOutput, saveAiOutput } from "@/server/services/outputStore";
+import { sweepExpiredOutputs, readOutput, saveAiOutput, getAiGenerationCount, incrementAiGenerationCount } from "@/server/services/outputStore";
 import { toAppError, httpStatusForCode, userMessageForCode } from "@/server/utils/errors";
 import { isSafeConversionId } from "@/server/utils/storage";
 import { takeRateLimit } from "@/server/utils/rateLimit";
@@ -58,6 +58,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return errorResponse("FILE_NOT_FOUND");
   }
 
+  const usedSoFar = await getAiGenerationCount(id);
+  if (usedSoFar >= config.aiGenerationLimit) {
+    log(`Generate limit reached for ${id} (${usedSoFar}/${config.aiGenerationLimit}).`);
+    return limitResponse(config.aiGenerationLimit);
+  }
+
   const baseName = stored.fileName.replace(/\.png$/i, "");
 
   try {
@@ -69,7 +75,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const fileName = `${baseName}-ai.png`;
     await saveAiOutput(id, image, fileName);
-    log(`AI image written to ${id}.ai.png.`);
+    const generationsUsed = await incrementAiGenerationCount(id);
+    log(`AI image written to ${id}.ai.png (generation ${generationsUsed}/${config.aiGenerationLimit}).`);
 
     return Response.json(
       {
@@ -78,21 +85,38 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         fileName,
         size: image.byteLength,
         durationMs,
+        generationsUsed,
+        generationsLimit: config.aiGenerationLimit,
       },
       { status: 200 },
     );
   } catch (err) {
     const appError = toAppError(err);
-    log(`Generate failed (${appError.code}): ${err instanceof Error ? err.message : String(err)}.`);
-    const status = httpStatusForCode(appError.code);
+    const code =
+      appError.code === "INTERNAL_ERROR" || appError.code === "PARSER_ERROR"
+        ? "AI_GENERATION_ERROR"
+        : appError.code;
+    log(`Generate failed (${code}): ${err instanceof Error ? err.message : String(err)}.`);
+    const status = httpStatusForCode(code);
     if (status >= 500) {
       console.error(err);
     }
     return Response.json(
-      { success: false, error: userMessageForCode(appError.code) },
+      { success: false, error: userMessageForCode(code) },
       { status },
     );
   }
+}
+
+function limitResponse(limit: number) {
+  return Response.json(
+    {
+      success: false,
+      error: `You've reached the maximum of ${limit} AI image generations for this drawing. Convert the DWG again to generate more.`,
+      generationsLimit: limit,
+    },
+    { status: httpStatusForCode("AI_LIMIT_REACHED") },
+  );
 }
 
 function errorResponse(code: string) {
