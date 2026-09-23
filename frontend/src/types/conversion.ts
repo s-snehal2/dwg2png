@@ -35,3 +35,9 @@ export interface AiImageResult {
   /** Maximum AI generations allowed per conversion. */
   generationsLimit: number;
 }
+
+export interface TilesviewResult {
+  success: boolean;
+  conversionId: string;
+  customRoomsId: number;
+}

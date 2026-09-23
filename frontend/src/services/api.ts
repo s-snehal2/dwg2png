@@ -1,4 +1,4 @@
-import type { ConversionError, ConversionResult, AiImageResult } from "@/types/conversion";
+import type { ConversionError, ConversionResult, AiImageResult, TilesviewResult } from "@/types/conversion";
 
 /** Client wrapper for the DWG → PNG API endpoints. */
 
@@ -76,4 +76,24 @@ export async function generateAiImage(
   }
 
   return parseJsonResponse<AiImageResult>(res, "AI image generation failed. Please try again.");
+}
+
+/** Call the server to upload a generated AI image to TilesView. */
+export async function sendToTilesview(
+  conversionId: string,
+  options?: { signal?: AbortSignal }
+): Promise<TilesviewResult> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/tilesview/${encodeURIComponent(conversionId)}`, {
+      method: "POST",
+      signal: options?.signal,
+    });
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw err;
+    }
+    throw new Error("Could not reach the server. Please try again.");
+  }
+  return parseJsonResponse<TilesviewResult>(res, "Sending to TilesView failed. Please try again.");
 }

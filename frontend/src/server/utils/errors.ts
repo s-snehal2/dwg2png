@@ -19,10 +19,12 @@ export type ErrorCode =
   | "FILE_NOT_FOUND"
   | "DOWNLOAD_ERROR"
   | "RATE_LIMITED"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "TILESVIEW_ERROR";
 
 export class AppError extends Error {
   readonly code: ErrorCode;
+
 
   constructor(code: ErrorCode, message: string) {
     super(message);
@@ -49,6 +51,7 @@ const USER_MESSAGES: Record<ErrorCode, string> = {
   DOWNLOAD_ERROR: "The PNG could not be downloaded.",
   RATE_LIMITED: "Too many requests. Please try again shortly.",
   INTERNAL_ERROR: "Conversion failed. Please try again.",
+    TILESVIEW_ERROR: "The AI image could not be sent to TilesView.",
 };
 
 export function userMessageForCode(code: ErrorCode): string {
@@ -82,6 +85,9 @@ export function httpStatusForCode(code: ErrorCode): number {
       return 500;
     default:
       return 500;
+    case "TILESVIEW_ERROR":
+      return 500;
+
   }
 }
 

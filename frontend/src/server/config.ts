@@ -24,6 +24,16 @@ export interface AppConfig {
   geminiModel: string;
   /** Max successful AI image generations allowed per converted drawing. */
   aiGenerationLimit: number;
+  /** TilesView room-planner API endpoint. */
+  tilesviewApiUrl: string;
+  /** TilesView app key (empty = TilesView integration disabled). */
+  tilesviewAppKey: string;
+  /** TilesView app secret (empty = TilesView integration disabled). */
+  tilesviewAppSecret: string;
+  /** Header name for the TilesView app key (default "app_key"). */
+  tilesviewAppKeyHeader: string;
+  /** Header name for the TilesView app secret (default "app_secret"). */
+  tilesviewAppSecretHeader: string;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -103,6 +113,12 @@ export function getConfig(): AppConfig {
     geminiPrompt: (process.env.GEMINI_PROMPT ?? DEFAULT_GEMINI_PROMPT).trim(),
     geminiModel: (process.env.GEMINI_MODEL ?? "gemini-3.1-flash-image").trim(),
     aiGenerationLimit: parsePositiveInt(process.env.AI_GENERATION_LIMIT, 5),
+    tilesviewApiUrl: (process.env.TILESVIEW_API_URL ?? "https://tilesview.ai/Provider/app/api-room-planner-data").trim(),
+    tilesviewAppKey: (process.env.TILESVIEW_APP_KEY ?? "").trim(),
+    tilesviewAppSecret: (process.env.TILESVIEW_APP_SECRET ?? "").trim(),
+    tilesviewAppKeyHeader: (process.env.TILESVIEW_APP_KEY_HEADER ?? "app_key").trim(),
+    tilesviewAppSecretHeader: (process.env.TILESVIEW_APP_SECRET_HEADER ?? "app_secret").trim(),
+
   };
 }
 

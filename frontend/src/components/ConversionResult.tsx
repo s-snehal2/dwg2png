@@ -2,12 +2,16 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
+
+import { downloadUrl, generateAiImage, aiDownloadUrl, sendToTilesview } from "@/services/api";
+
+import { Check, RotateCcw, Sparkles, Loader2, Download, MonitorSmartphone } from "lucide-react";
 import type { ConversionResult as ConversionResultData } from "@/types/conversion";
-import { downloadUrl, generateAiImage, aiDownloadUrl } from "@/services/api";
+
 import { Button } from "@/components/ui/button";
 import ImagePreviewCard from "@/components/ImagePreviewCard";
 import ImageLightbox from "@/components/ImageLightbox";
-import { Check, RotateCcw, Sparkles, Loader2, Download } from "lucide-react";
+
 
 interface ConversionResultProps {
   result: ConversionResultData;
@@ -20,6 +24,8 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
   const [aiDone, setAiDone] = useState(false);
   const [aiUsage, setAiUsage] = useState<{ used: number; limit: number } | null>(null);
   const [lightbox, setLightbox] = useState<"png" | "ai" | null>(null);
+  const [sendingToTilesview, setSendingToTilesview] = useState(false);
+  const [tilesviewRoomId, setTilesviewRoomId] = useState<number | null>(null);
 
   const handleDownload = useCallback(async () => {
     if (downloading) return;
@@ -62,6 +68,20 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
       setGenerating(false);
     }
   }, [generating, result.conversionId]);
+  const handleTilesview = useCallback(async () => {
+    if (sendingToTilesview) return;
+    setSendingToTilesview(true);
+    try {
+      const res = await sendToTilesview(result.conversionId);
+      setTilesviewRoomId(res.customRoomsId);
+      toast.success(`Sent to TilesView. Room ID: ${res.customRoomsId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sending to TilesView failed.";
+      toast.error(message);
+    } finally {
+      setSendingToTilesview(false);
+    }
+  }, [sendingToTilesview, result.conversionId]);
 
   const handleAiDownload = useCallback(async () => {
     if (downloading) return;
@@ -202,7 +222,28 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
                 onToggleBig={() => setLightbox("ai")}
                 onDownload={handleAiDownload}
               />
+              <Button
+                 variant="outline"
+                 className="mt-2 h-10 w-full rounded-xl bg-linear-to-r from-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-all hover:from-indigo-500 hover:to-violet-600 hover:shadow-indigo-500/40 disabled:from-indigo-500/60 disabled:to-violet-500/60"
+                 onClick={handleTilesview}
+                 disabled={sendingToTilesview}
+               >
+                 {sendingToTilesview ? <Loader2 className="animate-spin" /> : <MonitorSmartphone />}
+                 {sendingToTilesview ? "Sending to TilesView…" : "Send to Visualizer"}
+              </Button>
+
             </div>
+
+          )}
+          {tilesviewRoomId !== null && (
+            <a className="px-1 text-center text-xs text-muted-foreground"
+              href={`https://tilesview.ai/app/EZEnoscu4lODABbT_sHm7Q/visualizer/${tilesviewRoomId}/MySpace`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View in Visualizer : {tilesviewRoomId}
+
+            </a>
           )}
         </div>
       </div>

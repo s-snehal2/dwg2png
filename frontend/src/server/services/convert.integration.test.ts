@@ -22,6 +22,11 @@ const TEST_CONFIG: AppConfig = {
   geminiPrompt: "",
   geminiModel: "gemini-3.1-flash-image",
   aiGenerationLimit: 5,
+  tilesviewApiUrl: "https://tilesview.ai/Provider/app/api-room-planner-data",
+  tilesviewAppKey: "",
+  tilesviewAppSecret: "",
+  tilesviewAppKeyHeader: "app_key",
+  tilesviewAppSecretHeader: "app_secret",
 };
 
 const MINIMAL_DXF = `0
