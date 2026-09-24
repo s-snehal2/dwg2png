@@ -31,19 +31,15 @@ export async function sendRoomToTilesview(
   );
 
   let res: Response;
-  config.tilesviewApiUrl="https://tilesview.ai/Provider/app/api-room-planner-data"
-  console.log("config", config.tilesviewApiUrl);
   try {
     res = await fetch(config.tilesviewApiUrl, {
       method: "POST",
       headers: {
-        // "Content-Type": "multipart/form-data",
-         Accept: "application/json",
+        Accept: "application/json",
         app_key: config.tilesviewAppKey,
         app_secret: config.tilesviewAppSecret,
       },
       body: form,
-
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {

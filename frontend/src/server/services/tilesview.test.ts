@@ -20,6 +20,7 @@ function baseConfig(): AppConfig {
     geminiPrompt: "",
     geminiModel: "gemini-3.1-flash-image",
     aiGenerationLimit: 5,
+    geminiTimeoutMs: 240_000,
     tilesviewApiUrl: "https://tilesview.ai/Provider/app/api-room-planner-data",
     tilesviewAppKey: "k",
     tilesviewAppSecret: "s",

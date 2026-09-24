@@ -62,11 +62,14 @@ export async function generateDrawingImage(
         "x-goog-api-key": config.geminiApiKey,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(config.geminiTimeoutMs),
     },
   ).catch((err) => {
     if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new AppError("AI_GENERATION_ERROR", "The AI image request timed out after 90 seconds. Please try again.");
+      throw new AppError(
+        "AI_GENERATION_ERROR",
+        `The AI image request timed out after ${config.geminiTimeoutMs / 1000} seconds. Please try again.`,
+      );
     }
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new AppError("AI_GENERATION_ERROR", "The AI image request was aborted. Please try again.");

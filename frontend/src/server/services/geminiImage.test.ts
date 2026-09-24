@@ -18,6 +18,7 @@ const baseConfig: AppConfig = {
   geminiPrompt: "Turn this drawing into a photorealistic visualization.",
   geminiModel: "gemini-3.1-flash-image",
   aiGenerationLimit: 5,
+  geminiTimeoutMs: 240_000,
   tilesviewApiUrl: "https://tilesview.ai/Provider/app/api-room-planner-data",
   tilesviewAppKey: "",
   tilesviewAppSecret: "",

@@ -19,38 +19,49 @@ interface ConversionResultProps {
 }
 
 export default function ConversionResult({ result, onReset }: ConversionResultProps) {
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingPng, setDownloadingPng] = useState(false);
+  const [downloadingAi, setDownloadingAi] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [aiDone, setAiDone] = useState(false);
   const [aiUsage, setAiUsage] = useState<{ used: number; limit: number } | null>(null);
   const [lightbox, setLightbox] = useState<"png" | "ai" | null>(null);
   const [sendingToTilesview, setSendingToTilesview] = useState(false);
-  const [tilesviewRoomId, setTilesviewRoomId] = useState<number | null>(null);
 
-  const handleDownload = useCallback(async () => {
-    if (downloading) return;
-    setDownloading(true);
-    try {
-      const res = await fetch(downloadUrl(result.conversionId), { cache: "no-store" });
+  const downloadImageFile = useCallback(
+    async (url: string, fileName: string, notAvailable: string) => {
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok || !res.headers.get("content-type")?.includes("image/png")) {
-        throw new Error("Your converted file is no longer available on this server.");
+        throw new Error(notAvailable);
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = result.fileName;
+      a.href = objectUrl;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(objectUrl);
+    },
+    []
+  );
+
+  const handleDownload = useCallback(async () => {
+    if (downloadingPng) return;
+    setDownloadingPng(true);
+    try {
+      await downloadImageFile(
+        downloadUrl(result.conversionId),
+        result.fileName,
+        "Your converted file is no longer available on this server."
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "The PNG could not be downloaded.";
       toast.error(message);
     } finally {
-      setDownloading(false);
+      setDownloadingPng(false);
     }
-  }, [downloading, result.conversionId, result.fileName]);
+  }, [downloadingPng, downloadImageFile, result.conversionId, result.fileName]);
 
   const handleGenerate = useCallback(async () => {
     if (generating) return;
@@ -73,8 +84,8 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
     setSendingToTilesview(true);
     try {
       const res = await sendToTilesview(result.conversionId);
-      setTilesviewRoomId(res.customRoomsId);
       toast.success(`Sent to TilesView. Room ID: ${res.customRoomsId}`);
+      window.location.href = `https://tilesview.ai/app/EZEnoscu4lODABbT_sHm7Q/visualizer/${res.customRoomsId}/MySpace`;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sending to TilesView failed.";
       toast.error(message);
@@ -84,29 +95,21 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
   }, [sendingToTilesview, result.conversionId]);
 
   const handleAiDownload = useCallback(async () => {
-    if (downloading) return;
-    setDownloading(true);
+    if (downloadingAi) return;
+    setDownloadingAi(true);
     try {
-      const res = await fetch(aiDownloadUrl(result.conversionId), { cache: "no-store" });
-      if (!res.ok || !res.headers.get("content-type")?.includes("image/png")) {
-        throw new Error("The AI image is no longer available on this server.");
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${result.fileName.replace(/\.png$/i, "")}-ai.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadImageFile(
+        aiDownloadUrl(result.conversionId),
+        `${result.fileName.replace(/\.png$/i, "")}-ai.png`,
+        "The AI image is no longer available on this server."
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "The AI image could not be downloaded.";
       toast.error(message);
     } finally {
-      setDownloading(false);
+      setDownloadingAi(false);
     }
-  }, [downloading, result.conversionId, result.fileName]);
+  }, [downloadingAi, downloadImageFile, result.conversionId, result.fileName]);
 
   const lightboxSrc =
     lightbox === "ai"
@@ -147,15 +150,15 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
         <p className="truncate px-1 text-center text-xs font-medium text-muted-foreground">{result.fileName}</p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-row gap-3">
         <Button
           size="lg"
           className="h-11 flex-1 rounded-xl bg-linear-to-r from-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-all hover:from-indigo-500 hover:to-violet-600 hover:shadow-indigo-500/40 disabled:from-indigo-500/60 disabled:to-violet-500/60"
           onClick={handleDownload}
-          disabled={downloading}
+          disabled={downloadingPng}
         >
-          {downloading ? <Loader2 className="animate-spin" /> : <Download />}
-          {downloading ? "Downloading…" : "Download PNG"}
+          {downloadingPng ? <Loader2 className="animate-spin" /> : <Download />}
+          {downloadingPng ? "Downloading…" : "Download PNG"}
         </Button>
         <Button variant="outline" className="h-11 flex-1 rounded-xl text-sm sm:flex-none sm:px-6" onClick={onReset}>
           <RotateCcw />
@@ -222,28 +225,25 @@ export default function ConversionResult({ result, onReset }: ConversionResultPr
                 onToggleBig={() => setLightbox("ai")}
                 onDownload={handleAiDownload}
               />
-              <Button
-                 variant="outline"
-                 className="mt-2 h-10 w-full rounded-xl bg-linear-to-r from-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-all hover:from-indigo-500 hover:to-violet-600 hover:shadow-indigo-500/40 disabled:from-indigo-500/60 disabled:to-violet-500/60"
-                 onClick={handleTilesview}
-                 disabled={sendingToTilesview}
-               >
-                 {sendingToTilesview ? <Loader2 className="animate-spin" /> : <MonitorSmartphone />}
-                 {sendingToTilesview ? "Sending to TilesView…" : "Send to Visualizer"}
-              </Button>
-
+             <div className="flex flex-row gap-3 mt-3">
+                <Button
+                  className="h-11 flex-1 rounded-xl bg-linear-to-r from-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-all hover:from-indigo-500 hover:to-violet-600 hover:shadow-indigo-500/40 disabled:from-indigo-500/60 disabled:to-violet-500/60"
+                  onClick={handleAiDownload}
+                  disabled={downloadingAi}
+                >
+                  {downloadingAi ? <Loader2 className="animate-spin" /> : <Download />}
+                  {downloadingAi ? "Downloading…" : "Download image"}
+                </Button>
+                <Button
+                  className="h-11 flex-1 rounded-xl bg-linear-to-r from-indigo-500 to-violet-500 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-all hover:from-indigo-500 hover:to-violet-600 hover:shadow-indigo-500/40 disabled:from-indigo-500/60 disabled:to-violet-500/60"
+                  onClick={handleTilesview}
+                  disabled={sendingToTilesview}
+                >
+                  {sendingToTilesview ? <Loader2 className="animate-spin" /> : <MonitorSmartphone />}
+                  {sendingToTilesview ? "Sending to TilesView…" : "Send to Visualizer"}
+                </Button>
+              </div>
             </div>
-
-          )}
-          {tilesviewRoomId !== null && (
-            <a className="px-1 text-center text-xs text-muted-foreground"
-              href={`https://tilesview.ai/app/EZEnoscu4lODABbT_sHm7Q/visualizer/${tilesviewRoomId}/MySpace`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              View in Visualizer : {tilesviewRoomId}
-
-            </a>
           )}
         </div>
       </div>
