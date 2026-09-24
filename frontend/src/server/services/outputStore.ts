@@ -11,9 +11,9 @@ import { outputPath, aiOutputPath, writeBufferFileAtomic } from "@/server/utils/
  * images and their display names live in Vercel Blob so they survive the
  * convert→preview two-request flow on ephemeral serverless filesystems.
  *
- * Everywhere else (local dev, Docker, tests) the original on-disk layout is
- * used — `outputs/{id}.png` + a `{id}.png.name` sidecar — so nothing changes
- * outside Vercel.
+ * Everywhere else (local dev, tests) the original on-disk layout is used —
+ * `outputs/{id}.png` + a `{id}.png.name` sidecar — so nothing changes outside
+ * Vercel.
  */
 
 export function isBlobEnabled(): boolean {

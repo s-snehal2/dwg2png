@@ -1,25 +1,41 @@
-# Local environment (secrets and machine-specific settings)
-.env
+# Local environment — secrets and machine-specific settings.
+# Only .env.example templates are tracked.
+.env*
+!.env.example
 
-# Temp files generated at runtime
+# Runtime temp files (uploaded DWGs + converted outputs)
 /temp/
 frontend/temp/
 
 # OS
 .DS_Store
 Thumbs.db
+*.pem
 
-# Node / Next
+# Package managers (pnpm / yarn artifacts)
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Testing
+coverage/
+
+# Node / Next build output
 node_modules/
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+.next/
+out/
+build/
 
 # Logs
 *.log
 
-# Vercel
-.vercel
-frontend/.vercel
+# TypeScript / Next.js generated
+*.tsbuildinfo
+next-env.d.ts
 
+# Vercel
 .vercel

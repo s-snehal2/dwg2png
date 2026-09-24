@@ -80,15 +80,14 @@ the rasterization from the DWG parser and keeps the renderer fully ours.
 ## Configuration
 
 Settings are read from the environment at runtime (see `src/server/config.ts`)
-and live in a `.env` file. Where that file goes depends on how you run the app
-(see "Where the env file goes" below), and the exact copy command differs per
-path — start from the matching template.
+and live in a `.env` file in `frontend/` (Next.js loads it automatically).
+Start from the template: `cp frontend/.env.example frontend/.env`.
 
 Every value has a safe default, so you only need to change what matters to you:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TEMP_DIR` | `./temp` (local) / `/app/temp` (Docker) | Directory for staged uploads/outputs |
+| `TEMP_DIR` | `./temp` | Directory for staged uploads/outputs |
 | `MAX_FILE_SIZE_MB` | `50` | Maximum upload size |
 | `MAX_LAYOUTS` | `1` | Maximum paper-space layouts accepted; more single-sheet rejections |
 | `MAX_PNG_DIMENSION` | `3000` | Max output width/height in px |
@@ -100,19 +99,14 @@ Every value has a safe default, so you only need to change what matters to you:
 | `GEMINI_MODEL` | `gemini-3.1-flash-image` | Gemini model id used for AI image generation |
 | `GEMINI_PROMPT` | *(built-in)* | Static prompt sent to Gemini for architectural visualization; see `src/server/config.ts` for the default |
 
-> Note: `GEMINI_PROMPT` is only passed into the container when you set it in
-> your `.env` file (see the commented line in `docker-compose.yml`). Leaving it
-> empty uses the built-in prompt, so you never need to paste the full text in.
+> Note: `GEMINI_PROMPT` is optional. Leaving it empty uses the built-in
+> architectural-visualization prompt, so you never need to paste the full text
+> in.
 
-**Where the env file goes:**
-- **Without Docker** — edit `frontend/.env` (Next.js auto-loads it from the
-  `frontend/` directory).
-- **With Docker** — edit the root `.env` (Docker Compose reads it and injects
-  the values into the container).
+**Where the env file goes:** edit `frontend/.env` (Next.js auto-loads it from
+the `frontend/` directory).
 
-Start from the matching template:
-- **Without Docker** — `cp frontend/.env.example frontend/.env`
-- **With Docker** — `cp .env.example .env`
+Start from the template: `cp frontend/.env.example frontend/.env`
 
 Output files are download-safe: `/api/download/[id]` serves the PNG multiple
 times (no deletion on download) and temp files are swept after
@@ -120,10 +114,8 @@ times (no deletion on download) and temp files are swept after
 
 ## Run it
 
-### Without Docker (recommended)
-
-You only need Node.js (18+, LTS recommended) installed — no Docker required.
-The whole app runs in one Next.js process.
+You only need Node.js (18+, LTS recommended) installed. The whole app runs in
+one Next.js process.
 
 ```bash
 # 1. Create your local env file (edit it, e.g. add GEMINI_API_KEY)
@@ -145,20 +137,6 @@ Temporary uploads/outputs go to `frontend/temp/` by default (`TEMP_DIR=./temp`),
 and the same API endpoints are used (`/api/convert`, `/api/generate/[id]`,
 `/api/download/[id]`, `/api/download-ai/[id]`).
 
-### With Docker (optional)
-
-```bash
-cd dwg2png
-cp .env.example .env     # optional: edit values, e.g. add GEMINI_API_KEY
-docker compose up --build
-```
-
-Then open `http://localhost:3000`.
-
-This builds the standalone Next.js server in a Node container. Env values are
-injected from the root `.env` file, and temp files are persisted in the
-`dwg2png-temp` volume.
-
 ## Test
 
 ```bash
@@ -173,13 +151,10 @@ the PNG magic bytes and dimensions.
 
 ```
 dwg2png/
-├── docker-compose.yml            # OPTIONAL: single service + temp volume + env passthrough
-├── .env.example                  # template for Docker mode (copy + edit)
 ├── .gitignore
 ├── README.md
 └── frontend/
-    ├── .env.example              # template for local mode (copy + edit)
-    ├── Dockerfile                # OPTIONAL: standalone Next.js server (output: 'standalone')
+    ├── .env.example              # template (copy + edit)
     ├── next.config.ts            # serverExternalPackages for sharp + acad-ts
     ├── vitest.config.mts         # vitest config (node env, @ alias)
     └── src/

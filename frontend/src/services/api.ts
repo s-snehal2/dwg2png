@@ -23,7 +23,7 @@ async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Pro
 }
 
 /** Convert a DWG directly (no picker) — renders the single drawable sheet. */
-export async function convertDwg(
+export async function convertDwgFile(
   file: File,
   options?: { signal?: AbortSignal }
 ): Promise<ConversionResult> {

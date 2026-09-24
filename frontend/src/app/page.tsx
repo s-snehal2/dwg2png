@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import ConverterCard from "@/components/ConverterCard";
 import type { ConversionResult as ConversionResultData } from "@/types/conversion";
 import type { ProgressStep } from "@/components/ConversionProgress";
-import { convertDwg } from "@/services/api";
+import { convertDwgFile } from "@/services/api";
 
 const MAX_MB = 50;
 
@@ -81,7 +81,7 @@ export default function Home() {
     setStep("parse");
 
     try {
-      const converted = await convertDwg(file, { signal: controller.signal });
+      const converted = await convertDwgFile(file, { signal: controller.signal });
       setStep("render");
       setResult(converted);
       setStep("done");

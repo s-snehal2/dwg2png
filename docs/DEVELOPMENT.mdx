@@ -159,9 +159,7 @@ dwg2png/
 │   ├── eslint.config.mjs
 │   ├── next.config.ts
 │   └── package.json
-├── docker-compose.yml           # containerized "Docker Desktop" run
 ├── README.md                    # end-user docs (links here)
-├── .env.example
 └── docs/
     └── DEVELOPMENT.mdx          # this file
 ```
@@ -578,9 +576,7 @@ sharp rasterization of large files need it).
 ### Environment
 
 Copy `frontend/.env.example` → `frontend/.env` (Next.js auto-loads it from the
-`frontend/` directory). With Docker, edit the root `.env` instead —
-`docker-compose.yml` passes the relevant vars (including `MAX_LAYOUTS`,
-`PNG_SUPERSAMPLE`, `MIN_STROKE_PX`) into the container.
+`frontend/` directory).
 
 ### Testing
 
@@ -597,11 +593,6 @@ Real-DWG verification is done with a small throwaway test file placed under
 `frontend/temp/uploads/` (it is created, run, then deleted) — the repo's real
 samples stay out of git. The same directory holds the fixtures used by the
 integration tests.
-
-### Docker
-
-`docker compose up --build` builds the standalone Next server; temp files are
-persisted in the `dwg2png-temp` volume.
 
 ---
 
