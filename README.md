@@ -15,22 +15,39 @@ The pipeline is deliberately modular so each stage is unit-testable:
 
 ```
 Browser ─► POST /api/convert ─► reader  (acad-ts:  DWG  → normalized model)
-                                   │
-                                   ▼
-                            parser  (Drawing: entities, exploded inserts)
-                                   │
-                                   ▼
-                            bounds  (fit viewport + margin)
-                                   │
-                                   ▼
+                                    │
+                                    ▼
+                             parser  (Drawing: entities, exploded inserts)
+                                    │
+                                    ▼
+                             bounds  (fit viewport + margin)
+                                    │
+                                    ▼
                             renderer (own SVG renderer → clean SVG)
-                                   │
-                                   ▼
-                            sharp   (SVG → white PNG)
-                                   │
-                                   ▼
-              save output + sidecar → GET /api/download/[id] (one-shot)
+                                    │
+                                    ▼
+                             sharp   (SVG → white PNG)
+                                    │
+                                    ▼
+                 save output + sidecar → GET /api/download/[id] (one-shot)
 ```
+
+**Every paper-space layout becomes its own sheet.** One DWG upload renders one
+PNG per renderable layout (in tab order) — each with its own conversion id,
+preview card, download, and AI-image slot.
+
+**Model space is exported too, split by drawing.** In a multi-layout DWG the
+model space holds every layout's geometry parked side by side, so fitting all of
+it to one canvas makes each individual drawing unreadable. It is therefore cut
+at the widest whitespace gaps into separate crops named `Model`, `Model 2`, and
+so on, each fitted to its own bounds — which is what makes each one readable.
+The crops follow the layouts in the output.
+
+**One drawing in, one PNG out.** No layout is ever silently dropped. A sheet
+that renders almost empty is still exported, and the UI notes it as *sparse*
+rather than *skipped*. The only layouts left out are those with no content at
+all — no border, no title block, no viewport — since there is nothing to
+rasterize.
 
 Rather than relying on acad-ts's own SVG writer, we normalize its parsed model
 into a small internal `Drawing` model and render our own SVG. That decouples
@@ -53,14 +70,19 @@ the rasterization from the DWG parser and keeps the renderer fully ours.
 
 ### Supported files & entities (MVP)
 
-- DWG versions **R14 (AC1014)** through **AC1032** (AutoCAD 2018).
-- **Single-sheet DWGs only.** A DWG with more paper-space layouts than
-  `MAX_LAYOUTS` (default 1) is rejected with a clear "multiple layouts"
-  message instead of being converted — no sheet picker, one PNG per upload.
+- DWG versions **R13 (AC1012)** through **AC1032** (AutoCAD 2018 and newer —
+  the format has not changed since 2018, so AC1032 also covers AutoCAD 2019
+  through 2027).
+- **Multi-sheet DWGs.** Every paper-space layout (sheet) in the DWG is exported
+  as its own PNG, matching the tabs shown in AutoCAD, followed by the model-space
+  crops. A DWG with more layout sheets than `MAX_LAYOUTS` (default 100) is
+  rejected with a clear message instead of rendering unbounded sheets. Model
+  crops share that same budget: when the layouts leave too few slots, the crops
+  are merged together rather than dropped, so no drawing content is ever lost.
 - Modelspace entities: **LINE, CIRCLE, ARC, LWPOLYLINE/POLYLINE/2D/3D,
   POINT, ELLIPSE, TEXT, MTEXT**, and **INSERT** (expanded to their block's
   entities, capped to avoid runaway recursion).
-- Older pre-R14 DWGs (r1.x–r13) and password-protected files are rejected.
+- Older pre-R13 DWGs (r1.x–r12) and password-protected files are rejected.
 - Other entity types (HATCH, SPLINE, SOLID, dimension objects, …) are skipped
   with a warning rather than failing.
 
@@ -70,9 +92,10 @@ the rasterization from the DWG parser and keeps the renderer fully ours.
   per-character formatting beyond the base height aren't applied.
 - Text uses the drawing's insertion point/height with a default font; text
   style baselines aren't fully modeled.
-- When the DWG has a paper-space layout, that layout is rendered (the
-  "sheet"); otherwise raw model space is used. Multi-sheet DWGs (more pages
-  than `MAX_LAYOUTS`) are rejected.
+- Model space is exported alongside the layouts, split into one crop per
+  drawing. Drawings are told apart by whitespace: a gap worth less than
+  `MODEL_CLUSTER_GAP_FRACTION` of the overall model size is treated as part of
+  the same drawing, so a dense drawing is never shredded into unreadable tiles.
 - DWG is a reverse-engineered format; acad-ts does not decode 100% of every
   feature of every version. Most files convert cleanly; a rare one may surface
   as skipped entities or a friendly error — never a hang.
@@ -89,7 +112,9 @@ Every value has a safe default, so you only need to change what matters to you:
 | --- | --- | --- |
 | `TEMP_DIR` | `./temp` | Directory for staged uploads/outputs |
 | `MAX_FILE_SIZE_MB` | `50` | Maximum upload size |
-| `MAX_LAYOUTS` | `1` | Maximum paper-space layouts accepted; more single-sheet rejections |
+| `MAX_LAYOUTS` | `100` | Maximum sheets converted per DWG; exceeding it on the layout count rejects the file, and model crops are merged down to whatever budget the layouts leave |
+| `MODEL_CLUSTER_GAP_FRACTION` | `0.03` | Whitespace, as a fraction of the overall model size, that counts as a gap *between* drawings. Lower it to split more eagerly, raise it to keep drawings together |
+| `MODEL_CLUSTER_MAX_DEPTH` | `12` | Recursion ceiling for model clustering; caps worst-case crop count at 2^depth |
 | `MAX_PNG_DIMENSION` | `3000` | Max output width/height in px |
 | `MARGIN_PX` | `50` | Padding around the drawing, in px |
 | `CLEANUP_AGE_MINUTES` | `1440` | Age after which temp files are swept |
@@ -98,10 +123,13 @@ Every value has a safe default, so you only need to change what matters to you:
 | `GEMINI_API_KEY` | *(empty)* | Google AI API key; when set, enables AI image generation via Gemini 3.1 Flash (Nano Banana 2) |
 | `GEMINI_MODEL` | `gemini-3.1-flash-image` | Gemini model id used for AI image generation |
 | `GEMINI_PROMPT` | *(built-in)* | Static prompt sent to Gemini for architectural visualization; see `src/server/config.ts` for the default |
+| `MAX_AI_PROMPT_CHARS` | `1000` | Max length of the user-supplied AI image prompt |
 
 > Note: `GEMINI_PROMPT` is optional. Leaving it empty uses the built-in
 > architectural-visualization prompt, so you never need to paste the full text
-> in.
+> in. When the user types their own prompt in the UI, it is appended to this
+> base prompt so the drawing stays the source of truth while the user steers
+> style, lighting, and materials.
 
 **Where the env file goes:** edit `frontend/.env` (Next.js auto-loads it from
 the `frontend/` directory).
@@ -179,4 +207,4 @@ dwg2png/
             │                    #   Layer / Block
             └── utils/           # geometry, errors, fileValidation, lineWeight,
                                  #   rateLimit, storage
-```
+```# dwg-to-png-converter
